@@ -1,0 +1,482 @@
+name: Build AFFiNE Modular (macOS + iOS)
+
+
+
+on:
+
+  push:
+  
+    branches: [ modular-llm-mcp ]
+    
+  pull_request:
+  
+    branches: [ modular-llm-mcp ]
+    
+  workflow_dispatch:
+  
+
+
+env:
+
+  NODE_VERSION: '22'
+  
+  RUST_VERSION: '1.84'
+  
+
+
+jobs:
+
+  build-macos:
+  
+    name: Build macOS Desktop App
+    
+    runs-on: macos-14
+    
+    steps:
+    
+      - name: Checkout repository
+      
+        uses: actions/checkout@v4
+        
+        with:
+        
+          fetch-depth: 0
+          
+
+
+      - name: Setup Node.js
+      
+        uses: actions/setup-node@v4
+        
+        with:
+        
+          node-version: ${{ env.NODE_VERSION }}
+          
+          cache: 'yarn'
+          
+
+
+      - name: Setup Rust
+      
+        uses: dtolnay/rust-action@stable
+        
+        with:
+        
+          toolchain: ${{ env.RUST_VERSION }}
+          
+          components: rustfmt, clippy
+          
+
+
+      - name: Setup Python (for node-gyp)
+      
+        uses: actions/setup-python@v5
+        
+        with:
+        
+          python-version: '3.11'
+          
+
+
+      - name: Install dependencies
+      
+        run: |
+        
+          brew install pkg-config pixman cairo pango libpng libjpeg-turbo giflib librsvg
+          
+          yarn install --frozen-lockfile
+          
+
+
+      - name: Build native modules
+      
+        run: yarn workspace @affine/native build
+        
+
+
+      - name: Build server
+      
+        run: yarn workspace @affine/server build
+        
+
+
+      - name: Build Electron app (macOS)
+      
+        run: |
+        
+          yarn workspace @affine/electron build
+          
+          yarn workspace @affine/electron package:mac
+          
+        env:
+        
+          NODE_OPTIONS: --max-old-space-size=8192
+          
+
+
+      - name: Upload macOS artifact
+      
+        uses: actions/upload-artifact@v4
+        
+        with:
+        
+          name: AFFiNE-macOS-Universal
+          
+          path: packages/frontend/apps/electron/out/**/*.dmg
+          
+          retention-days: 30
+          
+
+
+  build-ios:
+  
+    name: Build iOS App
+    
+    runs-on: macos-14
+    
+    steps:
+    
+      - name: Checkout repository
+      
+        uses: actions/checkout@v4
+        
+
+
+      - name: Setup Node.js
+      
+        uses: actions/setup-node@v4
+        
+        with:
+        
+          node-version: ${{ env.NODE_VERSION }}
+          
+          cache: 'yarn'
+          
+
+
+      - name: Setup Rust
+      
+        uses: dtolnay/rust-action@stable
+        
+        with:
+        
+          toolchain: ${{ env.RUST_VERSION }}
+          
+
+
+      - name: Install dependencies
+      
+        run: yarn install --frozen-lockfile
+        
+
+
+      - name: Build iOS app
+      
+        run: |
+        
+          cd packages/frontend/apps/ios
+          
+          pod install
+          
+          xcodebuild -workspace AFFiNE.xcworkspace -scheme AFFiNE -configuration Release -destination 'generic/platform=iOS' build
+          
+
+
+      - name: Upload iOS artifact
+      
+        uses: actions/upload-artifact@v4
+        
+        with:
+        
+          name: AFFiNE-iOS
+          
+          path: packages/frontend/apps/ios/build/**/*.app
+          
+          retention-days: 30
+          
+
+
+  build-web:
+  
+    name: Build Web App
+    
+    runs-on: ubuntu-latest
+    
+    steps:
+    
+      - name: Checkout repository
+      
+        uses: actions/checkout@v4
+        
+
+
+      - name: Setup Node.js
+      
+        uses: actions/setup-node@v4
+        
+        with:
+        
+          node-version: ${{ env.NODE_VERSION }}
+          
+          cache: 'yarn'
+          
+
+
+      - name: Install dependencies
+      
+        run: yarn install --frozen-lockfile
+        
+
+
+      - name: Build web app
+      
+        run: yarn workspace @affine/web build
+        
+
+
+      - name: Upload web artifact
+      
+        uses: actions/upload-artifact@v4
+        
+        with:
+        
+          name: AFFiNE-Web
+          
+          path: packages/frontend/apps/web/dist
+          
+          retention-days: 30
+          
+
+
+  create-release:
+  
+    name: Create Release
+    
+    needs: [build-macos, build-ios, build-web]
+    
+    runs-on: ubuntu-latest
+    
+    if: github.event_name == 'push' && github.ref == 'refs/heads/modular-llm-mcp'
+    
+    steps:
+    
+      - name: Download all artifacts
+      
+        uses: actions/download-artifact@v4
+        
+        with:
+        
+          path: artifacts
+          
+
+
+      - name: Create Release
+      
+        uses: softprops/action-gh-release@v1
+        
+        with:
+        
+          tag_name: v${{ github.run_number }}-modular
+          
+          name: AFFiNE Modular Build ${{ github.run_number }}
+          
+          body: |
+          
+            ## 🚀 AFFiNE Modular Edition
+            
+
+            
+            ### 包含內容
+            
+            - ✅ macOS Desktop App (Universal)
+            
+            - ✅ iOS App
+            
+            - ✅ Web App
+            
+
+            
+            ### 魔改功能
+            
+            - 🔧 插拔式模組系統
+            
+            - 🧠 本地 LLM 整合
+            
+            - 🗄️ 向量數據庫
+            
+            - 🔌 MCP 服務器
+            
+
+            
+            ### 安裝說明
+            
+            1. 下載對應平台安裝包
+            
+            2. macOS: 打開 DMG 並拖入應用程式文件夾
+            
+            3. iOS: 使用 Xcode 安裝或使用 TestFlight
+            
+
+            
+            ### 系統要求
+            
+            - macOS 14.0 或更高版本
+            
+            - iOS 16.0 或更高版本
+            
+
+            
+          files: |
+          
+            artifacts/**/*.dmg
+            
+            artifacts/**/*.app
+            
+          draft: false
+          
+          prerelease: true
+          
+        env:
+        
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
